@@ -8,46 +8,67 @@ public class Mapa : MonoBehaviour
 {
     public SpriteRenderer MySpriteRederer;
     public Personagem MyPersonagem;
+    public bool Calculando = false;
 
     private Texture2D _texture;
+    private Sprite _spriteCopy;
     private Color[] _originalPixels;
-
     private Map _map;
-    public bool Calculando = false;
+
+    private Rect _textureRect;
+    private Rect _worldRect;
 
     void Start()
     {
+        _spriteCopy = Instantiate(MySpriteRederer.sprite);
+        MySpriteRederer.sprite = _spriteCopy;
         _texture = MySpriteRederer.sprite.texture;
         _originalPixels = _texture.GetPixels();
+
+        _textureRect = MySpriteRederer.sprite.rect;
+        _worldRect = ((RectTransform)transform).rect;
+
         _map = Map.Create(_texture);
     }
 
     void Update()
     {
-        if (!Input.GetMouseButtonDown(0)) return;
+        if (Input.GetMouseButtonDown(0))
+        {
 
-        _texture.SetPixels(_originalPixels);
-        var worldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-        var localPos = MySpriteRederer.transform.InverseTransformPoint(worldPos);
+            _texture.SetPixels(_originalPixels);
+            _texture.Apply();
 
-        var sprite = MySpriteRederer.sprite;
-        var pixelsPerUnit = sprite.pixelsPerUnit;
+            var mousePosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
 
-        var xTextureRectangle = MySpriteRederer.sprite.rect;
+            var destination = WorldPositionToTexturePosition(mousePosition);
+            var origin = WorldPositionToTexturePosition(MyPersonagem.transform.position);
 
-        var xWorldPositionRectangle = ((RectTransform)MySpriteRederer.transform).rect;
+            if (!Calculando)
+                StartCoroutine(CalcularCaminho(origin, destination));            
+        }
+    }
 
-        var oldRangeX = (xWorldPositionRectangle.xMax - xWorldPositionRectangle.xMin);
-        var newRangeX = (xTextureRectangle.width);
-        var newX = (int)((worldPos.x - xWorldPositionRectangle.xMin) * newRangeX) / oldRangeX + xTextureRectangle.xMin;
-        
-        var oldRangeY = (xWorldPositionRectangle.yMin - xWorldPositionRectangle.yMax);
-        var newRangeY = (xTextureRectangle.height);
-        var newY = (int)((worldPos.y - xWorldPositionRectangle.yMax) * newRangeY) / oldRangeY + xTextureRectangle.yMin;
+    void OnDestroy()
+    {
+        if (_texture != null)
+        {
+            _texture.SetPixels(_originalPixels);
+            _texture.Apply();
+        }
+    }
 
-        var xNewPosition = new Vector3(newX, newY, 0);
-        var xDestination = new Vector3(999, 999, 0);
-        StartCoroutine(CalcularCaminho(xNewPosition, xDestination));
+    private Vector3 WorldPositionToTexturePosition(Vector3 worldPosition)
+    {
+        var oldRangeX = _worldRect.xMax - _worldRect.xMin;
+        var newRangeX = _textureRect.xMax - _textureRect.xMin;
+        var newX = (int)((int)((worldPosition.x - _worldRect.xMin) * newRangeX) / oldRangeX + _textureRect.xMin);
+
+        var oldRangeY = _worldRect.yMin - _worldRect.yMax;
+        var newRangeY = _textureRect.yMin - _textureRect.yMax;
+        var newY = (int)((int)((worldPosition.y - _worldRect.yMin) * newRangeY) / oldRangeY + _textureRect.yMin);
+
+        return new Vector3(newX, newY, 0);
     }
 
     IEnumerator CalcularCaminho(Vector3 origem, Vector3 destino)
@@ -80,10 +101,18 @@ public class Mapa : MonoBehaviour
         foreach (var node in path)
         {
             _texture.SetPixel((int)node.Position.x, (int)node.Position.y, Color.green);
-            var xWordPositionX = node.Position.x / MySpriteRederer.sprite.pixelsPerUnit;
-            var xWordPositionY = node.Position.y / MySpriteRederer.sprite.pixelsPerUnit;
-            var xWordPosition = new Vector3(xWordPositionX, xWordPositionY, -2);
-            MyPersonagem.transform.position = xWordPosition;
+            _texture.Apply();
+
+            var oldRangeX = _textureRect.xMax - _textureRect.xMin;
+            var newRangeX = _worldRect.xMax - _worldRect.xMin;
+            var newX = ((int)node.Position.x - _textureRect.xMin) * newRangeX / oldRangeX + _worldRect.xMin;
+
+            var oldRangeY = _textureRect.yMax - _textureRect.yMin;
+            var newRangeY = _worldRect.yMax - _worldRect.yMin;
+            var newY = ((int)node.Position.y - _textureRect.yMin) * newRangeY / oldRangeY + _worldRect.yMin;
+            
+            var oldZ = MyPersonagem.transform.position.z;  
+            MyPersonagem.transform.position = new Vector3(newX, newY, oldZ);
             yield return null;
         }
 
@@ -184,7 +213,7 @@ public class Mapa : MonoBehaviour
                         Position = new Vector3(x, y, 0)
                     };
 
-                    AddNeighbors(texture, width, height, x, y, node);
+                    AddNeighbors(texture, x, y, node);
                     map._nodes[nodeId] = node;
                 }
             }
@@ -192,7 +221,7 @@ public class Mapa : MonoBehaviour
             return map;
         }
 
-        private static void AddNeighbors(Texture2D texture, int width, int height, int x, int y, Node node)
+        private static void AddNeighbors(Texture2D texture, int x, int y, Node node)
         {
             var offsets = new[] { (-1, 0), (1, 0), (0, -1), (0, 1) };
 
@@ -201,13 +230,13 @@ public class Mapa : MonoBehaviour
                 var nx = x + dx;
                 var ny = y + dy;
 
-                if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+                if (nx < 0 || ny < 0 || nx >= texture.width || ny >= texture.height)
                     continue;
 
                 if (texture.GetPixel(nx, ny).g == 0)
                     continue;
 
-                var neighborId = nx * height + ny;
+                var neighborId = nx * texture.height + ny;
                 node.Neighbors[neighborId] = 1f;
             }
         }
